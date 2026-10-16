@@ -26,7 +26,9 @@ import { useEffect, useRef, useState, useCallback } from 'react';
  *   ws://localhost:8000/ws/cashier
  */
  
-const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
+const WS_BASE_URL = import.meta.env.DEV
+  ? (import.meta.env.VITE_WS_URL || 'ws://localhost:8000')
+  : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
  
 export function useWebSocket(channel) {
   const [data, setData]     = useState(null);

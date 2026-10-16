@@ -12,12 +12,12 @@ export default function PlaceholderPage({ title }) {
  
   return (
     <div className="flex flex-col items-center justify-center min-h-64 p-8 text-center">
-      <div className="w-16 h-16 rounded-2xl bg-amber-100 flex items-center justify-center text-3xl mb-4">
+      <div className="w-16 h-16 rounded-2xl bg-warning/15 flex items-center justify-center text-3xl mb-4">
         🚧
       </div>
-      <h2 className="text-xl font-bold text-gray-800">{title}</h2>
-      <p className="mt-2 text-sm text-gray-400">Esta pantalla está en desarrollo.</p>
-      <code className="mt-2 text-xs text-gray-300 bg-gray-50 px-3 py-1 rounded-lg">
+      <h2 className="text-xl font-bold text-foreground">{title}</h2>
+      <p className="mt-2 text-sm text-muted-foreground">Esta pantalla está en desarrollo.</p>
+      <code className="mt-2 text-xs text-muted-foreground bg-muted px-3 py-1 rounded-lg">
         {pathname}
       </code>
     </div>

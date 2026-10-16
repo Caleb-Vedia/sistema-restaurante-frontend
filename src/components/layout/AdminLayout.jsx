@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
- 
+import LogoutButton from '../auth/LogoutButton';
+
 /**
  * Ítems de navegación del sidebar.
  * Agregar una ruta nueva aquí la hace aparecer automáticamente en el menú.
@@ -8,6 +9,9 @@ const NAV_ITEMS = [
   { label: 'Dashboard',    to: '/admin',             icon: '📊', end: true },
   { label: 'Categorías',   to: '/admin/categories',  icon: '🏷️' },
   { label: 'Productos',    to: '/admin/products',    icon: '🍽️' },
+  { label: 'Usuarios',     to: '/admin/users',       icon: '👤' },
+  { label: 'Mesas',        to: '/admin/tables',      icon: '🪑' },
+  { label: 'Métodos de pago', to: '/admin/payment-methods', icon: '💳' },
   { label: 'Reportes',     to: '/admin/reports',     icon: '📈' },
 ];
  
@@ -50,6 +54,10 @@ export default function AdminLayout() {
             </NavLink>
           ))}
         </nav>
+
+        <div className="p-3 border-t border-gray-200">
+          <LogoutButton className="flex w-full items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" />
+        </div>
       </aside>
  
       {/* ── Contenido principal ── */}
