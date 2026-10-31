@@ -1,13 +1,8 @@
 /**
  * Almacenamiento local de los pedidos que el cliente creó en ESTA visita.
  *
- * Por qué existe
- * --------------
- * El módulo cliente no tiene ningún GET de pedidos: no hay
- * `GET /pedidos/:id` ni `GET /pedidos/mis-pedidos`. La respuesta del
- * `POST /pedidos` es la ÚNICA copia del pedido que el frontend va a ver
- * jamás. Si se pierde, no se puede recuperar de ningún lado. Por eso cada
- * respuesta exitosa se guarda acá apenas llega.
+ * Conserva snapshots para el tracking y el intento pendiente para recuperar
+ * respuestas inciertas por su clave en GET /pedidos/mis-pedidos.
  *
  * Se guarda el response REAL del backend, tal cual: `idPedido`, `nroOrden`,
  * `nombreComensal`, `estado`, `creadoEl`, `detalles`. Nada inventado — ni
@@ -33,15 +28,14 @@
  * "falló": es "no sabemos si el backend lo creó". Se persiste porque
  * CartPage puede desmontarse y volver a montarse, y el bloqueo de reenvío
  * no puede depender solo de un useState que se pierde en ese remonte.
- * Guarda únicamente `createdAt` y las `lineKey` (identidad de línea/variante
+ * Guarda `createdAt`, la clave del intento y las `lineKey` (identidad de línea/variante
  * del carrito — ver cartLineKey.js, no `idProducto`: dos variantes del
  * mismo producto pueden estar en grupos distintos, y bloquear por
  * `idProducto` bloquearía/desbloquearía la variante equivocada) del grupo
- * afectado — ningún dato sensible.
+ * afectado. `pendingAttempt` conserva además el payload exacto enviado.
  *
- * Todas las escrituras son best-effort: sessionStorage puede fallar (modo
- * privado agresivo, cuota llena). Un fallo de storage NUNCA significa que
- * el pedido no se creó — ver el uso en useCheckout.
+ * sessionStorage puede fallar: guardar el intento ANTES del POST es obligatorio.
+ * Un fallo posterior al envío no significa que el pedido no se creó.
  */
 
 const CLIENT_ORDERS_STORAGE_PREFIX = 'restaurant-client-orders:';
@@ -123,6 +117,7 @@ export function saveClientOrder(tableId, token, pedido) {
   if (yaGuardado) return true;
 
   return escribirRegistro(tableId, {
+    ...registro,
     token,
     orders: [...orders, pedido],
     ambiguous: registro?.ambiguous ?? null,
@@ -179,6 +174,7 @@ export function updateClientOrder(tableId, token, pedido) {
     : [...orders, pedido];
 
   return escribirRegistro(tableId, {
+    ...registro,
     token,
     orders: nuevasOrders,
     ambiguous: registro?.ambiguous ?? null,
@@ -190,7 +186,15 @@ export function updateClientOrder(tableId, token, pedido) {
  * Devuelve el marcador o null si no hay ninguno vigente.
  */
 export function readAmbiguousMarker(tableId, token) {
-  return leerRegistroDeLaVisita(tableId, token)?.ambiguous ?? null;
+  const registro = leerRegistroDeLaVisita(tableId, token);
+  if (registro?.ambiguous) return registro.ambiguous;
+  const intento = registro?.pendingAttempt;
+  // Una recarga durante el POST no sabe si hubo commit: nunca crea otra clave.
+  return intento ? {
+    createdAt: intento.createdAt,
+    itemIds: intento.lines.map(line => line.lineKey),
+    claveIdempotencia: intento.claveIdempotencia,
+  } : null;
 }
 
 /**
@@ -202,9 +206,12 @@ export function readAmbiguousMarker(tableId, token) {
  */
 export function markAmbiguousResult(tableId, token, itemIds) {
   const registro = leerRegistroDeLaVisita(tableId, token);
-  const ambiguous = { createdAt: new Date().toISOString(), itemIds };
+  const ambiguous = { createdAt: new Date().toISOString(), itemIds,
+    ...(registro?.pendingAttempt ? { claveIdempotencia: registro.pendingAttempt.claveIdempotencia } : {}),
+  };
 
   escribirRegistro(tableId, {
+    ...registro,
     token,
     orders: registro?.orders ?? [],
     ambiguous,
@@ -220,11 +227,66 @@ export function markAmbiguousResult(tableId, token, itemIds) {
  */
 export function clearAmbiguousResult(tableId, token) {
   const registro = leerRegistroDeLaVisita(tableId, token);
+  if (registro?.pendingAttempt) return false;
   if (!registro?.ambiguous) return;
 
   escribirRegistro(tableId, {
+    ...registro,
     token,
     orders: registro.orders,
     ambiguous: null,
   });
+}
+
+function localAttemptError(message) {
+  const error = new Error(message);
+  error.code = 'ORDER_ATTEMPT_NOT_SENT';
+  return error;
+}
+
+function nuevaClave() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  // getRandomValues también está disponible en el despliegue HTTP sin contexto seguro.
+  if (!globalThis.crypto?.getRandomValues) throw localAttemptError('El navegador no permite identificar el pedido de forma segura.');
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = [...bytes].map(value => value.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function readPendingAttempt(tableId, token) {
+  return leerRegistroDeLaVisita(tableId, token)?.pendingAttempt ?? null;
+}
+
+export function prepareOrderAttempt(tableId, token, area, payload, items) {
+  const registro = leerRegistroDeLaVisita(tableId, token);
+  if (registro?.pendingAttempt) {
+    if (JSON.stringify(registro.pendingAttempt.payload) !== JSON.stringify(payload)) {
+      throw localAttemptError('Hay un intento pendiente. Consultá su resultado antes de cambiar el pedido.');
+    }
+    return registro.pendingAttempt;
+  }
+  const intento = {
+    claveIdempotencia: nuevaClave(), area, payload,
+    lines: items.map(item => ({ lineKey: item.lineKey, cantidad: item.cantidad })),
+    createdAt: new Date().toISOString(),
+  };
+  if (!escribirRegistro(tableId, { ...registro, token, orders: registro?.orders ?? [], ambiguous: null, pendingAttempt: intento })) {
+    throw localAttemptError('No se envió el pedido: no se pudo guardar la identidad del intento en este navegador.');
+  }
+  return intento;
+}
+
+export function discardRejectedAttempt(tableId, token) {
+  const registro = leerRegistroDeLaVisita(tableId, token);
+  if (!registro) return true;
+  return escribirRegistro(tableId, { ...registro, pendingAttempt: null, ambiguous: null });
+}
+
+export function completeOrderAttempt(tableId, token, clave, pedido) {
+  const registro = leerRegistroDeLaVisita(tableId, token);
+  if (registro?.pendingAttempt?.claveIdempotencia !== clave) return false;
+  const orders = registro.orders.filter(order => order?.idPedido !== pedido.idPedido);
+  return escribirRegistro(tableId, { ...registro, orders: [...orders, pedido], pendingAttempt: null, ambiguous: null });
 }

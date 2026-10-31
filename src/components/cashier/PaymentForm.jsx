@@ -48,7 +48,7 @@ function validateRow(row) {
  * podía ganarle de mano al callback `onSuccess` de la propia llamada,
  * perdiendo el aviso aunque el pago ya estuviera guardado en el backend.
  */
-function PaymentFormFields({ idMesa, saldoPendiente, metodos, onPaid, registerPayment }) {
+function PaymentFormFields({ idMesa, idSesion, saldoPendiente, metodos, onPaid, registerPayment, disabled }) {
   const nextRowId = useRef(1);
 
   const createRow = () => ({
@@ -69,7 +69,7 @@ function PaymentFormFields({ idMesa, saldoPendiente, metodos, onPaid, registerPa
 
   const allRowsValid = rows.length > 0 && validations.every((v) => v.valid);
   const amountMatches = distributedCents === targetCents;
-  const canSubmit = !isPending && allRowsValid && amountMatches && targetCents > 0;
+  const canSubmit = !disabled && !isPending && allRowsValid && amountMatches && targetCents > 0;
 
   const updateRow = (key, patch) => {
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
@@ -98,7 +98,9 @@ function PaymentFormFields({ idMesa, saldoPendiente, metodos, onPaid, registerPa
     });
 
     registerPayment.mutate(
-      { idMesa, pagos },
+      // idSesion solo identifica el feedback local; el hook conserva el body
+      // existente { idMesa, pagos } del contrato HTTP.
+      { idMesa, idSesion, pagos },
       // Este callback corre después de que el hook terminó de refetchear,
       // así la pantalla ya tiene el estado real cuando reacciona al resultado.
       { onSuccess: (data) => onPaid(data) },
@@ -211,7 +213,7 @@ function PaymentFormFields({ idMesa, saldoPendiente, metodos, onPaid, registerPa
         )}
       </dl>
 
-      {registerPayment.isError && (
+      {registerPayment.isError && registerPayment.variables?.idSesion === idSesion && (
         <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
           {registerPayment.error?.message || 'No se pudo registrar el cobro. Revisá los datos e intentá de nuevo.'}
         </p>
@@ -246,7 +248,7 @@ function PaymentFormFields({ idMesa, saldoPendiente, metodos, onPaid, registerPa
  *   CashierPage (ver PaymentFormFields para el motivo) y pasada tal cual
  *   hasta acá — este componente no la toca, solo la reenvía.
  */
-export default function PaymentForm({ idMesa, saldoPendiente, onPaid, registerPayment }) {
+export default function PaymentForm({ idMesa, idSesion, saldoPendiente, onPaid, registerPayment, disabled = false }) {
   const { data: metodos, isLoading, isError, refetch } = usePaymentMethods();
 
   if (isLoading) {
@@ -273,6 +275,8 @@ export default function PaymentForm({ idMesa, saldoPendiente, onPaid, registerPa
   return (
     <PaymentFormFields
       idMesa={idMesa}
+      idSesion={idSesion}
+      disabled={disabled}
       saldoPendiente={saldoPendiente}
       metodos={metodos}
       onPaid={onPaid}

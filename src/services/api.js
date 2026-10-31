@@ -14,6 +14,8 @@
  * lanza un Error con ese mensaje.
  */
  
+import { captureStaffSession } from './queryClient';
+
 const BASE_URL = import.meta.env.DEV
   ? (import.meta.env.VITE_API_URL || 'http://localhost:8000')
   : '/api';
@@ -37,6 +39,13 @@ async function request(endpoint, options = {}) {
     },
   };
  
+  const path = endpoint.split('?')[0];
+  // Los hooks de auth resuelven sus propios errores. Las rutas públicas y
+  // los tokens de mesa (incluso vacíos/ inválidos) son independientes del staff.
+  const independentRequest = ['/menu', '/auth/login', '/auth/logout', '/auth/me'].includes(path)
+    || /^\/mesas\/[^/]+\/sesion$/.test(path);
+  const staffSession = !independentRequest && !new Headers(config.headers).has('X-Table-Token')
+    ? captureStaffSession() : null;
   const response = await fetch(`${BASE_URL}${endpoint}`, config);
  
   // 204 No Content: respuesta válida sin cuerpo
@@ -44,8 +53,27 @@ async function request(endpoint, options = {}) {
  
   let data = null;
   try {
-    data = await response.json();
-  } catch {
+    if (path === '/caja/actual' && (config.method ?? 'GET').toUpperCase() === 'GET' && response.status === 200) {
+      // Nest serializa null sin cuerpo. Solo esta lectura admite ausencia
+      // real de bytes: JSON ilegible o un stream truncado siguen siendo errores.
+      const body = await response.arrayBuffer();
+      if (body.byteLength === 0) return null;
+      data = JSON.parse(new TextDecoder().decode(body));
+    } else {
+      data = await response.json();
+    }
+  } catch (cause) {
+    if (response.ok) {
+      // Un 2xx ilegible no confirma una escritura. `status` queda reservado
+      // para rechazos HTTP; los consumidores deben tratar esto como incierto.
+      const error = new Error('No se pudo interpretar la respuesta del servidor.');
+      error.name = 'ResponseBodyError';
+      error.code = 'INVALID_RESPONSE_BODY';
+      error.httpStatus = response.status;
+      error.cause = cause;
+      throw error;
+    }
+    // Un rechazo HTTP sigue siendo tal aunque su cuerpo no sea JSON.
     data = null;
   }
 
@@ -55,6 +83,9 @@ async function request(endpoint, options = {}) {
       : data?.message;
     const error = new Error(message || `Error HTTP ${response.status}`);
     error.status = response.status;
+    if (typeof data?.code === 'string') error.code = data.code;
+    // No serializar la referencia interna de la caché al registrar el error.
+    if (staffSession) Object.defineProperty(error, 'staffSession', { value: staffSession });
     throw error;
   }
 
@@ -112,4 +143,3 @@ export const resolveAssetUrl = (urlImagen) => {
   if (/^https?:\/\//i.test(urlImagen)) return urlImagen;
   return `${new URL(BASE_URL, window.location.origin).origin}${urlImagen}`;
 };
- 

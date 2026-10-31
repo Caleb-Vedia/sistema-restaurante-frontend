@@ -1,8 +1,9 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ClipboardCheck, DoorOpen, RefreshCw, Wallet } from 'lucide-react';
 import { useCurrentCashRegister } from '../../hooks/useCurrentCashRegister';
 import { useOpenCashRegister } from '../../hooks/useOpenCashRegister';
-import { useTables } from '../../hooks/useTables';
+import { TABLES_KEY, useTables } from '../../hooks/useTables';
 import { useTableBalance } from '../../hooks/useTableBalance';
 import { useRegisterPayment } from '../../hooks/useRegisterPayment';
 import { usePaymentMethods } from '../../hooks/usePaymentMethods';
@@ -357,7 +358,7 @@ function TableSummaryPanel({ selectedMesa, tieneSesionActiva, balance, isLoading
 
             <BalanceSummary balance={balance} />
 
-            <TableConsumption idMesa={balance.idMesa} />
+            <TableConsumption idMesa={balance.idMesa} idSesion={balance.idSesion} />
           </>
         )}
       </CardContent>
@@ -406,7 +407,7 @@ function CobroPanel({ selectedMesa, tieneSesionActiva, balance, isLoading, isErr
           <p className="py-6 text-center text-sm text-muted-foreground">No se pudo consultar la cuenta de esta mesa.</p>
         )}
 
-        {selectedMesa && tieneSesionActiva && !isLoading && !isError && balance && (
+        {selectedMesa && tieneSesionActiva && !isLoading && balance && (
           <>
             {cobroBloqueado && (
               <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5 text-sm text-warning-foreground">
@@ -417,13 +418,15 @@ function CobroPanel({ selectedMesa, tieneSesionActiva, balance, isLoading, isErr
             {balance.saldoPendiente > 0 && !cobroBloqueado && (
               <PaymentForm
                 idMesa={balance.idMesa}
+                idSesion={balance.idSesion}
+                disabled={isError}
                 saldoPendiente={balance.saldoPendiente}
                 onPaid={onPaid}
                 registerPayment={registerPayment}
               />
             )}
 
-            {balance.saldoPendiente === 0 && !cobroBloqueado && (
+            {balance.saldoPendiente === 0 && !cobroBloqueado && !isError && (
               <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3">
                 <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <DoorOpen className="h-3.5 w-3.5" aria-hidden="true" />
@@ -446,11 +449,11 @@ function CobroPanel({ selectedMesa, tieneSesionActiva, balance, isLoading, isErr
  * comportamiento original, `/pagos?idMesa=` no exige sesión activa).
  */
 function TableBillingPanel(props) {
-  const { selectedMesa } = props;
+  const { selectedMesa, idCierre } = props;
   return (
     <div className="flex flex-col gap-4">
       <CobroPanel {...props} />
-      {selectedMesa && <PaymentHistory idMesa={selectedMesa.idMesa} />}
+      {selectedMesa && <PaymentHistory idMesa={selectedMesa.idMesa} idSesion={selectedMesa.sesionActiva?.idSesion ?? null} idCierre={idCierre} />}
     </div>
   );
 }
@@ -546,14 +549,16 @@ function PaymentOutcomeBanner() {
  * CashRegisterCloseResult) usan esta MISMA estructura de dos capas — ya no
  * quedan "fuera" del tema claro de Caja ni de su ancho completo.
  */
-export default function CashierPage() {
-  const { data: caja, isLoading, isError, refetch } = useCurrentCashRegister();
+function CashierTurn({ caja, onClosed }) {
+  const queryClient = useQueryClient();
+  const [closingOpen, setClosingOpen] = useState(false);
+  const tablesQuery = useTables({ enabled: !closingOpen, refetchInterval: closingOpen ? false : 4000 });
   const {
     data: mesas,
     isLoading: mesasLoading,
     isError: mesasError,
     refetch: refetchMesas,
-  } = useTables();
+  } = tablesQuery;
 
   // Se guarda solo el id, no el objeto mesa completo: así `selectedMesa` se
   // deriva del listado ['mesas'] en cada render (mismo patrón que
@@ -569,7 +574,10 @@ export default function CashierPage() {
   // compartan la MISMA consulta sin duplicarla.
   const tieneSesionActiva = !!selectedMesa?.sesionActiva;
   const idMesaParaSaldo = tieneSesionActiva ? selectedMesa.idMesa : null;
-  const { data: balance, isLoading: balanceLoading, isError: balanceError, refetch: refetchBalance } = useTableBalance(idMesaParaSaldo);
+  const idSesion = selectedMesa?.sesionActiva?.idSesion ?? null;
+  const selectionKey = [selectedMesaId, idSesion ?? 'libre'].join(':');
+  const { data: balance, isLoading: balanceLoading, isError: balanceError, refetch: refetchBalance } =
+    useTableBalance(idMesaParaSaldo, idSesion, { enabled: !closingOpen });
 
   // Vive ACÁ, no dentro de PaymentForm, a propósito: un cobro exitoso hace
   // que la mesa deje de tener saldo pendiente (o se libere), lo que
@@ -583,13 +591,6 @@ export default function CashierPage() {
   const registerPayment = useRegisterPayment();
 
   const [paymentOutcome, setPaymentOutcome] = useState(null);
-  const [closingOpen, setClosingOpen] = useState(false);
-
-  // Resultado del arqueo recién generado. Es feedback efímero de una
-  // mutation, no estado de servidor de larga duración: existe solo para
-  // que el resumen siga visible después de que /caja/actual pase a null,
-  // y se descarta cuando el usuario elige finalizar.
-  const [lastCloseResult, setLastCloseResult] = useState(null);
 
   // Cambiar de mesa descarta el feedback del cobro anterior: ese aviso
   // pertenece a la operación que se acaba de hacer, no a la nueva selección.
@@ -605,9 +606,13 @@ export default function CashierPage() {
 
   const handlePaid = (data) => {
     if (data?.mesaLiberada) {
-      // Sesión cerrada: se suelta la selección para no volver a consultar el
-      // saldo de una sesión que ya no existe (daría 404).
-      setSelectedMesaId(null);
+      // El POST puede terminar después de seleccionar otra mesa o de que
+      // empiece otra visita. No descartar ese nuevo contexto por el cobro viejo.
+      const idMesaPagada = data.mesa.idMesa;
+      const mesaActual = queryClient.getQueryData(TABLES_KEY)?.find((m) => m.idMesa === idMesaPagada);
+      const otraSesion = mesaActual?.sesionActiva != null
+        && mesaActual.sesionActiva.idSesion !== data.idSesion;
+      if (!otraSesion) setSelectedMesaId((id) => id === idMesaPagada ? null : id);
       setPaymentOutcome({ type: 'success' });
       return;
     }
@@ -633,73 +638,6 @@ export default function CashierPage() {
     setSelectedMesaId(null);
   };
 
-  const handleClosed = (resultado) => {
-    setClosingOpen(false);
-    setSelectedMesaId(null);
-    setPaymentOutcome(null);
-    setLastCloseResult(resultado);
-  };
-
-  // Se evalúa ANTES que loading/error/caja===null a propósito: al cerrar,
-  // ['caja','actual'] se invalida y pasa a null, pero el usuario todavía
-  // tiene que poder leer el arqueo. Sin esta guarda aparecería el
-  // formulario "Abrir caja" encima del resumen recién generado.
-  if (lastCloseResult) {
-    return (
-      <div className="flex-1 bg-background text-foreground">
-        <div className="mx-auto w-full max-w-7xl p-4">
-          <CashRegisterCloseResult
-            resultado={lastCloseResult}
-            onFinish={() => setLastCloseResult(null)}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex flex-1 items-center justify-center bg-background px-4 py-24 text-foreground">
-        <Spinner size="lg" className="text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (isError) {
-    return (
-      <div className="flex-1 bg-background text-foreground">
-        <div className="mx-auto w-full max-w-7xl p-4">
-          <EmptyState
-            icon={<AlertTriangle />}
-            title="No se pudo consultar el estado de caja"
-            description="Hubo un problema al conectar con el servidor. Probá de nuevo."
-          >
-            <Button variant="outline" onClick={() => refetch()}>
-              <RefreshCw className="h-4 w-4" /> Reintentar
-            </Button>
-          </EmptyState>
-        </div>
-      </div>
-    );
-  }
-
-  if (caja === null) {
-    // El turno dejó de existir mientras el wizard estaba abierto (otra
-    // terminal lo cerró, o este mismo cierre falló con 409 "ya no hay caja
-    // abierta"). Se baja la bandera acá para que al abrir un turno NUEVO la
-    // pantalla arranque en Operación y no de vuelta en el cierre. Ajustar
-    // estado durante el render es el patrón de React para derivar de un
-    // cambio externo: re-renderiza antes de pintar, sin efecto ni parpadeo.
-    if (closingOpen) setClosingOpen(false);
-    return (
-      <div className="flex-1 bg-background text-foreground">
-        <div className="mx-auto w-full max-w-7xl p-4">
-          <OpenCashRegisterForm />
-        </div>
-      </div>
-    );
-  }
-
   // El cierre en 4 pasos TOMA la pantalla en vez de abrirse encima de
   // Operación. No es una decisión estética: el Paso 2 es un arqueo ciego, y
   // Operación muestra en la misma vista los "Ingresos del turno"
@@ -713,7 +651,7 @@ export default function CashierPage() {
         <div className="mx-auto w-full max-w-7xl p-4">
           <CloseCashRegisterWizard
             caja={caja}
-            onClosed={handleClosed}
+            onClosed={onClosed}
             onCancel={() => setClosingOpen(false)}
           />
         </div>
@@ -742,9 +680,11 @@ export default function CashierPage() {
 
         {paymentOutcome?.type === 'not-released' && (
           <PaymentRecovery
+            key={paymentOutcome.idSesion}
             outcome={paymentOutcome}
             onReleased={handleTableReleased}
             onDismiss={handleRecoveryDismiss}
+            tablesQuery={tablesQuery}
           />
         )}
 
@@ -780,6 +720,8 @@ export default function CashierPage() {
             />
 
             <TableBillingPanel
+              key={selectionKey}
+              idCierre={caja.idCierre}
               selectedMesa={selectedMesa}
               tieneSesionActiva={tieneSesionActiva}
               balance={balance}
@@ -793,10 +735,80 @@ export default function CashierPage() {
           </div>
         </div>
 
-        <ShiftActivity />
+        <ShiftActivity idCierre={caja.idCierre} />
 
         <PaymentMethodsSection />
       </div>
     </div>
+  );
+}
+
+/** La identidad del turno separa selección, formularios y cierre de cada caja. */
+export default function CashierPage() {
+  const { data: caja, isLoading, isError, refetch } = useCurrentCashRegister({ refetchInterval: 4000 });
+  // La identidad persiste también cuando /caja/actual devuelve null. Así una
+  // respuesta tardía no puede sustituir el resumen de otro turno observado.
+  const [closeFeedback, setCloseFeedback] = useState({ idCierre: null, resultado: null });
+  if (caja && caja.idCierre !== closeFeedback.idCierre) {
+    setCloseFeedback({ idCierre: caja.idCierre, resultado: null });
+  }
+  const lastCloseResult = closeFeedback.resultado;
+  const handleClosed = (resultado) => {
+    setCloseFeedback((actual) => actual.idCierre === resultado.idCierre
+      ? { ...actual, resultado }
+      : actual);
+  };
+
+  if (lastCloseResult) {
+    return (
+      <div className="flex-1 bg-background text-foreground">
+        <div className="mx-auto w-full max-w-7xl p-4">
+          <CashRegisterCloseResult resultado={lastCloseResult}
+            onFinish={() => setCloseFeedback((actual) => ({ ...actual, resultado: null }))} />
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-1 items-center justify-center bg-background px-4 py-24 text-foreground">
+        <Spinner size="lg" className="text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (isError && caja == null) {
+    return (
+      <div className="flex-1 bg-background text-foreground">
+        <div className="mx-auto w-full max-w-7xl p-4">
+          <EmptyState icon={<AlertTriangle />} title="No se pudo consultar el estado de caja"
+            description="Hubo un problema al conectar con el servidor. Probá de nuevo.">
+            <Button variant="outline" onClick={() => refetch()}>
+              <RefreshCw className="h-4 w-4" /> Reintentar
+            </Button>
+          </EmptyState>
+        </div>
+      </div>
+    );
+  }
+
+  if (caja === null) {
+    return (
+      <div className="flex-1 bg-background text-foreground">
+        <div className="mx-auto w-full max-w-7xl p-4"><OpenCashRegisterForm /></div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {isError && (
+        <div className="bg-background px-4 py-2">
+          <InlineRetry message="No se pudo actualizar el estado del turno." onRetry={refetch} />
+        </div>
+      )}
+      <CashierTurn key={caja.idCierre} caja={caja} onClosed={handleClosed} />
+    </>
   );
 }

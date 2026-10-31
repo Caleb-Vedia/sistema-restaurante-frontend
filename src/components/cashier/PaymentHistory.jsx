@@ -128,8 +128,8 @@ function PaymentHistoryRow({ pago, idMesa }) {
  *   mesa tras anular — anular ya no depende de si la sesión seguía activa,
  *   porque puede reabrirla.
  */
-export default function PaymentHistory({ idMesa }) {
-  const { data: pagos, isLoading, isError, refetch } = usePaymentHistory(idMesa);
+export default function PaymentHistory({ idMesa, idSesion, idCierre }) {
+  const { data: pagos, isLoading, isError, refetch } = usePaymentHistory(idMesa, idSesion, idCierre);
 
   return (
     <Card>

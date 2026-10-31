@@ -81,8 +81,8 @@ function OrderBlock({ pedido }) {
  * puramente informativo para la cajera — presentación compacta, no un
  * segundo KDS.
  */
-export default function TableConsumption({ idMesa }) {
-  const { data: consumo, isLoading, isError, refetch } = useTableConsumption(idMesa);
+export default function TableConsumption({ idMesa, idSesion }) {
+  const { data: consumo, isLoading, isError, refetch } = useTableConsumption(idMesa, idSesion);
 
   return (
     <div className="flex flex-col gap-2 border-t border-border pt-4">

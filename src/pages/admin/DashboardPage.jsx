@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useOperationalDay } from '../../hooks/useOperationalDay';
 import { Link } from 'react-router-dom';
 import { useSalesReport } from '../../hooks/useSalesReport';
 import { useTopSellingProductsReport } from '../../hooks/useTopSellingProductsReport';
@@ -8,7 +9,7 @@ import { useKdsOrders } from '../../hooks/useKdsOrders';
 import Spinner from '../../components/ui/Spinner';
 import EmptyState from '../../components/ui/EmptyState';
 import { Button } from '../../components/ui/Button';
-import { formatCurrency, formatDateDisplay, formatDateTime, toLocalDateString } from '../../utils';
+import { formatCurrency, formatDateDisplay, formatDateTime } from '../../utils';
 
 function KpiCard({ label, value, note }) {
   return (
@@ -425,19 +426,24 @@ function TopProductsSection({ query }) {
  * simula: reutiliza useSalesReport/useTopSellingProductsReport/
  * useCurrentCashRegister/useTables/useKdsOrders tal cual, sin modificarlos.
  *
- * `hoy` se calcula una sola vez al montar (useState perezoso) con
- * toLocalDateString(new Date()) — no toISOString(), para no correr el día
- * por UTC — y se reutiliza como desde/hasta en ambos reportes.
+ * `hoy` sigue el día operativo de America/La_Paz y se reutiliza como
+ * desde/hasta en ambos reportes y en el encabezado.
  *
  * A propósito NO incluye serieDiaria (ReportsPage ya la muestra, y en un
  * rango de un solo día no aporta) ni selector de fechas: para otros
  * períodos ya existe /admin/reports.
  */
 export default function DashboardPage() {
-  const [hoy] = useState(() => toLocalDateString(new Date()));
+  const [hoy, refreshDay] = useOperationalDay();
 
   const salesReport = useSalesReport(hoy, hoy);
   const topProductsReport = useTopSellingProductsReport(hoy, hoy, 5);
+  // Los hooks compartidos conservan filtros anteriores en ReportsPage. Aquí
+  // no presentar cifras de ayer bajo el encabezado de hoy durante la carga.
+  const salesToday = salesReport.isPlaceholderData
+    ? { ...salesReport, data: undefined, isLoading: true } : salesReport;
+  const topToday = topProductsReport.isPlaceholderData
+    ? { ...topProductsReport, data: undefined, isLoading: true } : topProductsReport;
   const cashRegister = useCurrentCashRegister();
   const tables = useTables();
   const cocinaOrders = useKdsOrders('cocina');
@@ -445,7 +451,7 @@ export default function DashboardPage() {
 
   const [refreshing, setRefreshing] = useState(false);
 
-  // Refetch manual simple de las queries en paralelo — sin timers propios.
+  // Refetch manual de las queries en paralelo.
   // cocinaOrders/bebidasOrders ya pollean solas cada 4s (useKdsOrders); se
   // incluyen igual acá para que "Actualizar" refresque todo el Dashboard
   // como una sola acción, igual criterio que el resto de las secciones.
@@ -453,9 +459,11 @@ export default function DashboardPage() {
   const handleRefreshAll = async () => {
     setRefreshing(true);
     try {
+      const currentDay = refreshDay();
       await Promise.all([
-        salesReport.refetch(),
-        topProductsReport.refetch(),
+        // Si cambió el día, React Query cargará las nuevas claves al renderizar.
+        // Refetchear estos observers ahora pediría otra vez el día anterior.
+        ...(currentDay === hoy ? [salesReport.refetch(), topProductsReport.refetch()] : []),
         cashRegister.refetch(),
         tables.refetch(),
         cocinaOrders.refetch(),
@@ -479,18 +487,18 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <SalesKpis query={salesReport} />
+        <SalesKpis query={salesToday} />
         <CashRegisterCard query={cashRegister} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <TablesSection query={tables} />
-        <PaymentMethodsSection query={salesReport} />
+        <PaymentMethodsSection query={salesToday} />
       </div>
 
       <KdsSummarySection cocinaQuery={cocinaOrders} bebidasQuery={bebidasOrders} />
 
-      <TopProductsSection query={topProductsReport} />
+      <TopProductsSection query={topToday} />
     </div>
   );
 }

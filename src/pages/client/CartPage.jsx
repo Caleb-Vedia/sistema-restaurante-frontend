@@ -19,6 +19,7 @@ import {
   DialogClose,
 } from '../../components/ui/dialog';
 import { formatCurrency } from '../../utils';
+import { isOrderConfirmation } from '../../utils/orderConfirmation';
 
 /**
  * Resumen legible de la personalización de una línea — mismo formato
@@ -157,17 +158,20 @@ function CartItemRow({ item, disabled, onEdit }) {
  * ofrecer un link que no puede cumplir su promesa.
  */
 function PedidosCreados({ pedidos, tableId, huboFallo, storageFailedIds }) {
+  const confirmados = pedidos.filter(isOrderConfirmation);
+  if (confirmados.length === 0) return null;
+
   const titulo = huboFallo
     ? 'Parte del pedido fue enviada.'
-    : pedidos.length === 1
+    : confirmados.length === 1
       ? 'Pedido enviado correctamente.'
-      : `Se registraron ${pedidos.length} pedidos para preparar tus productos.`;
+      : `Se registraron ${confirmados.length} pedidos para preparar tus productos.`;
 
   return (
     <div className="mx-4 rounded-xl border border-success/30 bg-success/10 p-4" role="status">
       <p className="text-sm font-semibold text-success-foreground">{titulo}</p>
       <ul className="mt-2 space-y-1">
-        {pedidos.map((pedido) => (
+        {confirmados.map((pedido) => (
           <li key={pedido.idPedido} className="flex items-center justify-between gap-3 text-sm text-success-foreground">
             <span>Pedido #{pedido.nroOrden} registrado</span>
             {!storageFailedIds.includes(pedido.idPedido) && (
@@ -241,14 +245,14 @@ function PedidoRechazado({ failure, huboExitoPrevio }) {
  * se dice "el pedido falló" porque no lo sabemos — el restaurante pudo
  * haberlo recibido.
  *
- * No hay botón de "comprobar pedido": el módulo cliente no tiene ningún
- * endpoint de lectura de pedidos con el que reconciliar, y fingir uno sería
- * peor que no tenerlo. La única salida honesta es consultar al personal.
+ * "Mis pedidos" consulta lo registrado en esta sesión. Revisar esa lista no
+ * identifica automáticamente qué líneas del carrito conviene retirar;
+ * el reconocimiento sigue siendo explícito, con ayuda del personal.
  *
  * El aviso sobrevive a que la pantalla se desmonte (vive en sessionStorage)
  * y solo se va cuando el usuario lo reconoce explícitamente.
  */
-function ResultadoIncierto({ bloqueaEnvio, onReconocer }) {
+function ResultadoIncierto({ tableId, bloqueaEnvio, onReconocer, isSubmitting, canRetry, onRetry }) {
   return (
     <div className="mx-4 rounded-xl border-2 border-warning/40 bg-warning/10 p-4" role="alert">
       <p className="text-sm font-bold text-warning-foreground">No se pudo confirmar el resultado del último envío.</p>
@@ -257,16 +261,24 @@ function ResultadoIncierto({ bloqueaEnvio, onReconocer }) {
         duplicados.
       </p>
       <p className="mt-2 text-sm font-semibold text-warning-foreground">Consultá al personal antes de intentar nuevamente.</p>
+      <Link to={`/menu/${tableId}/orders`} className="mt-2 inline-block text-sm font-semibold underline">
+        Consultar pedidos registrados
+      </Link>
 
       {bloqueaEnvio && (
         <p className="mt-2 text-xs text-warning-foreground">
-          El envío queda bloqueado para estos productos hasta que confirmes que ya consultaste.
+          El envío queda bloqueado hasta comprobar el resultado del intento pendiente.
         </p>
       )}
 
-      <Button variant="outline" size="sm" className="mt-3 h-9" onClick={onReconocer}>
+      <Button variant="outline" size="sm" className="mt-3 h-9" onClick={onReconocer} disabled={isSubmitting}>
         Ya consulté al personal
       </Button>
+      {canRetry && (
+        <Button variant="outline" size="sm" className="mt-3 h-9" onClick={onRetry} disabled={isSubmitting}>
+          Reintentar mismo intento
+        </Button>
+      )}
     </div>
   );
 }
@@ -310,6 +322,8 @@ export default function CartPage() {
     ambiguous,
     enviarPedido,
     reconocerResultadoIncierto,
+    canRetry,
+    reintentarMismoIntento,
   } = useCheckout({ tableId, token: session.token });
 
   // Solo para resolver `producto.ingredientes` al editar una línea (ver
@@ -350,14 +364,10 @@ export default function CartPage() {
 
   const cuentaSolicitada = session.estado === 'cuenta_solicitada';
 
-  // El bloqueo por resultado incierto aplica a las MISMAS líneas/variantes
-  // del grupo que quedó sin confirmar (identificadas por `lineKey`, no por
-  // `idProducto`: dos variantes del mismo producto no deben bloquearse
-  // entre sí) — si siguen en el carrito, reenviarlas es exactamente el
-  // riesgo de duplicado que se quiere evitar. Si el usuario ya las sacó, el
-  // aviso se sigue mostrando pero no bloquea un carrito que ya es otro.
+  // Con clave, primero se resuelve el intento aunque las líneas hayan cambiado.
+  // Los marcadores anteriores sin clave conservan su bloqueo por variante.
   const bloqueadoPorResultadoIncierto =
-    !!ambiguous && items.some((item) => ambiguous.itemIds.includes(item.lineKey));
+    !!ambiguous && (!!ambiguous.claveIdempotencia || items.some((item) => ambiguous.itemIds.includes(item.lineKey)));
 
   const puedeEnviar = !isEmpty && !cuentaSolicitada && !isSubmitting && !bloqueadoPorResultadoIncierto;
 
@@ -375,8 +385,12 @@ export default function CartPage() {
 
       {ambiguous && (
         <ResultadoIncierto
+          tableId={tableId}
           bloqueaEnvio={bloqueadoPorResultadoIncierto}
           onReconocer={reconocerResultadoIncierto}
+          isSubmitting={isSubmitting}
+          canRetry={canRetry}
+          onRetry={reintentarMismoIntento}
         />
       )}
 
@@ -398,6 +412,7 @@ export default function CartPage() {
       {failure?.kind === 'rechazado' && (
         <PedidoRechazado failure={failure} huboExitoPrevio={createdOrders.length > 0} />
       )}
+      {failure?.kind === 'local' && <p className="mx-4 text-sm text-destructive" role="alert">{failure.message}</p>}
 
       {mostrarCarritoVacio ? (
         <div className="px-4 py-8">

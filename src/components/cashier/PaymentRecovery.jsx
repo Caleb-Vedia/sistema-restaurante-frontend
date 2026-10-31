@@ -1,4 +1,3 @@
-import { useTables } from '../../hooks/useTables';
 import { useReleaseTable } from '../../hooks/useReleaseTable';
 import Spinner from '../ui/Spinner';
 import { Button } from '../ui/Button';
@@ -44,9 +43,10 @@ function ResolvedPanel({ nombreMesa, mensaje, onDismiss }) {
  * - outcome: { idMesa, idSesion, nombreMesa } tomados del response real del POST
  * - onReleased: aviso de que la sesión quedó cerrada (la página suelta la selección)
  * - onDismiss: descarta el estado de recuperación ya resuelto
+ * - tablesQuery: lectura compartida con Caja, sin otro observer ni intervalo
  */
-export default function PaymentRecovery({ outcome, onReleased, onDismiss }) {
-  const { data: mesas, isLoading, isError, refetch } = useTables();
+export default function PaymentRecovery({ outcome, onReleased, onDismiss, tablesQuery }) {
+  const { data: mesas, isLoading, isError, refetch } = tablesQuery;
   const releaseTable = useReleaseTable();
 
   // Resuelto vía PATCH (o vía reconciliación de un 404 que confirmó que la

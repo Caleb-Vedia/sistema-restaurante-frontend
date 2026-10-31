@@ -183,14 +183,14 @@ function VisitCard({ sesion }) {
  * READ-ONLY: ninguna fila ofrece acciones (ni de KDS ni de pagos). Solo
  * lectura para entender el turno.
  */
-export default function ShiftActivity() {
-  const { data: actividad, isLoading, isError, refetch } = useShiftActivity();
+export default function ShiftActivity({ idCierre }) {
+  const { data: actividad, isLoading, isError, refetch } = useShiftActivity(idCierre);
 
   return (
     <Card>
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
         <CardTitle className="text-sm uppercase tracking-wide text-muted-foreground">Actividad del turno</CardTitle>
-        {actividad && (
+        {!isError && actividad && (
           <span className="text-sm">
             <span className="text-muted-foreground">Ingresos del turno: </span>
             <span className="font-bold text-success-foreground">{formatCurrency(actividad.totalIngresosTurno)}</span>

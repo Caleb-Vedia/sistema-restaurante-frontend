@@ -29,7 +29,6 @@ const MODULE_CONFIG = {
  * Características:
  * - Fondo oscuro (slate-900): reduce fatiga visual en entornos de trabajo
  * - Texto grande: legible a distancia en cocina o barra
- * - Indicador de conexión: referencia visual para cuando integremos WebSocket
  * - Recibe el prop `module` para personalizar el encabezado
  *
  * `<main>` es `flex flex-col` a propósito, y ahora es GENUINAMENTE full-width
@@ -79,12 +78,6 @@ export default function StaffLayout({ module }) {
           </div>
 
           <div className="flex items-center gap-4">
-            {/* Indicador de estado de conexión - se conectará a useWebSocket más adelante */}
-            <div className="flex items-center gap-2 text-sm text-white/60">
-              <span className="w-2 h-2 rounded-full bg-green-400" />
-              En línea
-            </div>
-
             <LogoutButton className="text-sm font-medium text-white/70 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed" />
           </div>
         </div>
@@ -97,4 +90,3 @@ export default function StaffLayout({ module }) {
     </div>
   );
 }
- 

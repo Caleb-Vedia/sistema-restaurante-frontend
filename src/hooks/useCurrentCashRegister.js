@@ -7,17 +7,17 @@ export const CURRENT_CASH_REGISTER_KEY = ['caja', 'actual'];
 /**
  * Estado de la caja del turno actual: GET /caja/actual.
  *
- * El backend responde 200 con body `null` cuando no hay caja abierta — es
- * un resultado válido (mismo criterio que useAuth con /auth/me y su 401),
- * no un error: `data` queda en `null` de forma natural, sin try/catch.
+ * Sin caja abierta, Nest puede enviar 200 vacío en lugar de JSON `null`.
+ * api.get normaliza ese caso específico a null; no oculta respuestas ilegibles
+ * ni errores de red/HTTP. El hook conserva sus condiciones e intervalo.
  *
- * Sin polling: abrir caja es una acción explícita de la cajera al empezar
- * el turno, no algo que cambie por fuera de esta pantalla en tiempo real
- * (a diferencia del KDS, que sí necesita reflejar pedidos de otros roles).
+ * Caja solicita polling para detectar aperturas/cierres externos. El
+ * dashboard conserva su comportamiento actual, sin polling.
  */
-export function useCurrentCashRegister() {
+export function useCurrentCashRegister({ refetchInterval = false } = {}) {
   return useQuery({
     queryKey: CURRENT_CASH_REGISTER_KEY,
-    queryFn: () => api.get('/caja/actual'),
+    queryFn: ({ signal }) => api.get('/caja/actual', { signal }),
+    refetchInterval,
   });
 }

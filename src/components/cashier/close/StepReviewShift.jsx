@@ -46,7 +46,7 @@ export default function StepReviewShift({ contexto, onNext, onCancel }) {
         </CardContent>
       </Card>
 
-      <ShiftActivity />
+      <ShiftActivity idCierre={contexto.idCierre} />
 
       <Card>
         <CardHeader>

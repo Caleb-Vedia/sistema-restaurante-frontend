@@ -94,14 +94,15 @@ export function buildOrderPayload({ nombreComensal, items }) {
  *   - `status >= 500` → el contrato actual no permite demostrar que la
  *     operación no quedó persistida
  *
- * Un 4xx, en cambio, es un rechazo CONFIRMADO: el servidor procesó el
- * request y decidió no crear el pedido.
+ * Un 4xx común es un rechazo confirmado. Los códigos de idempotencia son
+ * diferentes: puede existir un pedido anterior y no se debe borrar su clave.
  *
  * Ante la duda se prefiere el lado seguro (incierto), porque el costo de
  * equivocarse es duplicar un pedido real en la cocina.
  */
 export function isAmbiguousError(error) {
-  return typeof error?.status !== 'number' || error.status >= 500;
+  return ['IDEMPOTENCY_CONTENT_MISMATCH', 'IDEMPOTENCY_PENDING'].includes(error?.code)
+    || typeof error?.status !== 'number' || error.status >= 500;
 }
 
 /**
@@ -117,15 +118,8 @@ export function isAmbiguousError(error) {
  * propósito: es específico del módulo cliente y no debe viajar en el resto
  * de las llamadas de la app (por eso NO se agregó global en api.js).
  *
- * `retry: false` explícito, aunque el QueryClient global ya lo tenga: crear
- * un pedido tiene efectos secundarios reales en cocina/barra y no existe
- * idempotency key. Un reintento automático sobre un resultado incierto
- * duplicaría comida. La bandera se declara acá para que la prohibición sea
- * local y visible, y no dependa de una configuración lejana que alguien
- * podría cambiar.
- *
- * No invalida queries: el cliente no tiene ninguna lectura de pedidos que
- * refrescar.
+ * `retry: false` explícito: incluso con clave, la recuperación y el reenvío
+ * son decisiones explícitas del cliente. Se conserva el payload del intento.
  *
  * Uso:
  *   const createOrder = useCreateOrder();
@@ -133,8 +127,8 @@ export function isAmbiguousError(error) {
  */
 export function useCreateOrder() {
   return useMutation({
-    mutationFn: ({ token, nombreComensal, items }) =>
-      api.post('/pedidos', buildOrderPayload({ nombreComensal, items }), {
+    mutationFn: ({ token, nombreComensal, items, payload, claveIdempotencia }) =>
+      api.post('/pedidos', { ...(payload ?? buildOrderPayload({ nombreComensal, items })), claveIdempotencia }, {
         headers: { 'X-Table-Token': token },
       }),
     retry: false,

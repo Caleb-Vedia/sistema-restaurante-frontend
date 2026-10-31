@@ -7,14 +7,14 @@ export const TABLES_KEY = ['mesas'];
 /**
  * Listado de mesas para Caja: GET /mesas.
  *
- * El backend ya ordena por idMesa ASC — no se reordena acá. Sin polling:
- * no hay un requisito de tiempo real para esta fase (a diferencia del KDS);
- * la cajera puede refrescar la vista con las herramientas por defecto de
- * React Query (refoco de ventana, refetch manual).
+ * Caja habilita polling explícitamente; los demás consumidores conservan
+ * las lecturas e invalidaciones habituales.
  */
-export function useTables() {
+export function useTables({ enabled = true, refetchInterval = false } = {}) {
   return useQuery({
     queryKey: TABLES_KEY,
-    queryFn: () => api.get('/mesas'),
+    queryFn: ({ signal }) => api.get('/mesas', { signal }),
+    enabled,
+    refetchInterval,
   });
 }

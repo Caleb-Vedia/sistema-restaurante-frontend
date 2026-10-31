@@ -1,7 +1,7 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
-import { AUTH_ME_KEY } from './useAuth';
+import { invalidateStaffSession } from '../services/queryClient';
 
 /**
  * Mutación de logout del staff.
@@ -19,13 +19,12 @@ import { AUTH_ME_KEY } from './useAuth';
  *   logout.mutate();
  */
 export function useLogout() {
-  const queryClient = useQueryClient();
   const navigate = useNavigate();
 
   return useMutation({
     mutationFn: () => api.post('/auth/logout'),
     onSuccess: () => {
-      queryClient.setQueryData(AUTH_ME_KEY, null);
+      void invalidateStaffSession();
       navigate('/login', { replace: true });
     },
   });

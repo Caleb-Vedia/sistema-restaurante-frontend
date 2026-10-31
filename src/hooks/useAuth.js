@@ -1,12 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
+import { AUTH_ME_KEY } from '../services/queryClient';
 
 /**
  * Clave de cache de la sesión actual.
  * Se exporta para que useLogin / useLogout invaliden exactamente la misma
  * entrada sin repetir el array literal en cada archivo.
  */
-export const AUTH_ME_KEY = ['auth', 'me'];
+export { AUTH_ME_KEY };
 
 /**
  * Hook de sesión del staff.
@@ -35,9 +36,9 @@ export const AUTH_ME_KEY = ['auth', 'me'];
 export function useAuth() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: AUTH_ME_KEY,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       try {
-        return await api.get('/auth/me');
+        return await api.get('/auth/me', { signal });
       } catch (err) {
         // 401: no hay sesión, es un resultado válido, no un fallo.
         if (err.status === 401) return null;

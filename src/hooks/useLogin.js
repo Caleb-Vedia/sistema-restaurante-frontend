@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import { AUTH_ME_KEY } from './useAuth';
+import { invalidateStaffSession } from '../services/queryClient';
 
 /**
  * Mutación de login del staff.
@@ -24,6 +25,11 @@ export function useLogin() {
   return useMutation({
     mutationFn: ({ email, password }) =>
       api.post('/auth/login', { email, password }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: AUTH_ME_KEY }),
+    onSuccess: async () => {
+      // Cambiar la versión inmediatamente: errores de solicitudes de la sesión
+      // anterior no deben afectar la sesión que estamos recuperando.
+      await invalidateStaffSession();
+      await queryClient.invalidateQueries({ queryKey: AUTH_ME_KEY, exact: true });
+    },
   });
 }

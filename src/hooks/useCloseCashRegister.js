@@ -22,13 +22,10 @@ import { CURRENT_SHIFT_ACTIVITY_KEY } from './useShiftActivity';
  * perspectiva del usuario, y un segundo intento sobre una caja ya cerrada
  * devuelve 409.
  *
- * A diferencia de useLogin / useRegisterPayment, este onSuccess NO devuelve
- * la promesa de invalidateQueries a propósito: si la mutación quedara
- * pending hasta que /caja/actual refresque, la query devolvería `null`
- * ANTES de que la pantalla pueda guardar el resultado del arqueo, y el
- * usuario vería un parpadeo del formulario "Abrir caja" en lugar del
- * resumen recién generado. Disparando la invalidación sin esperarla, el
- * callback de mutate() guarda el resultado en el mismo tick de la respuesta.
+ * El resultado se entrega desde onSuccess DEL HOOK: TanStack lo ejecuta
+ * aunque el polling haya desmontado el wizard antes de llegar el PATCH.
+ * onClosed conserva el resumen en CashierPage antes de invalidar la caja.
+ * No se espera esa invalidación ni se depende del callback de mutate().
  *
  * Solo se invalida ['caja','actual']: cerrar caja no cambia mesas, ni
  * historial de pagos, ni nada del KDS o de auth. Las sesiones abiertas
@@ -56,13 +53,14 @@ import { CURRENT_SHIFT_ACTIVITY_KEY } from './useShiftActivity';
  *   const closeCashRegister = useCloseCashRegister();
  *   closeCashRegister.mutate({ detalle: [...], observacionDiferencia: '...' });
  */
-export function useCloseCashRegister() {
+export function useCloseCashRegister({ onClosed } = {}) {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (body) => api.patch('/caja/cerrar', body),
 
-    onSuccess: () => {
+    onSuccess: (resumen) => {
+      onClosed?.(resumen);
       queryClient.invalidateQueries({ queryKey: CURRENT_CASH_REGISTER_KEY });
       queryClient.removeQueries({ queryKey: CURRENT_SHIFT_ACTIVITY_KEY });
     },

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
+import { assertCashierContext } from '../utils/cashierQueryContext';
 
 /** Clave de cache del contexto de cierre del turno en curso. */
 export const CLOSE_CONTEXT_KEY = ['caja', 'cierre', 'contexto'];
@@ -29,11 +30,16 @@ export const CLOSE_CONTEXT_KEY = ['caja', 'cierre', 'contexto'];
  * `enabled` permite montarlo sin disparar la consulta: solo se pide cuando el
  * wizard está efectivamente abierto.
  */
-export function useCloseContext({ enabled = true } = {}) {
+export function useCloseContext({ idCierre, enabled = true, refetchInterval = false } = {}) {
   return useQuery({
-    queryKey: CLOSE_CONTEXT_KEY,
-    queryFn: () => api.get('/caja/cierre/contexto'),
-    enabled,
+    queryKey: [...CLOSE_CONTEXT_KEY, idCierre],
+    queryFn: async ({ signal }) => {
+      const contexto = await api.get('/caja/cierre/contexto', { signal });
+      assertCashierContext(contexto.idCierre, idCierre);
+      return contexto;
+    },
+    enabled: enabled && idCierre != null,
+    refetchInterval,
     gcTime: 0,
   });
 }

@@ -113,12 +113,14 @@ function WizardShell({ caja, pasoActual, cerrando, children }) {
  * - onCancel: sale del wizard sin cerrar nada
  */
 export default function CloseCashRegisterWizard({ caja, onClosed, onCancel }) {
-  const contexto = useCloseContext();
   const metodosPago = usePaymentMethods();
   const preview = useClosePreview();
-  const closeCashRegister = useCloseCashRegister();
+  const closeCashRegister = useCloseCashRegister({ onClosed });
 
   const [paso, setPaso] = useState(1);
+  // Solo el paso de revisión se refresca; no alterar métodos/conteos mientras
+  // se completa el arqueo ni recalcular previews automáticamente.
+  const contexto = useCloseContext({ idCierre: caja.idCierre, refetchInterval: paso === 1 ? 4000 : false });
   const [montos, setMontos] = useState({});
   const [observacion, setObservacion] = useState('');
   const [ultimoPreview, setUltimoPreview] = useState(null);
@@ -208,7 +210,6 @@ export default function CloseCashRegisterWizard({ caja, onClosed, onCancel }) {
   const confirmarCierre = () => {
     setConfirmOpen(false);
     closeCashRegister.mutate(construirBody(), {
-      onSuccess: (resumen) => onClosed(resumen),
       onError: () => {
         preview.mutate(construirBody(), {
           onSuccess: (resultado) => setUltimoPreview(resultado),

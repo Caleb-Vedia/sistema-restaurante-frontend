@@ -1,27 +1,22 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
+import { assertCashierContext } from '../utils/cashierQueryContext';
 
-/** Clave de cache de la deuda de una mesa puntual. */
-export const tableBalanceKey = (idMesa) => ['pagos', 'total', idMesa];
+// Sin idSesion sigue siendo el prefijo que invalidan las mutaciones locales.
+export const tableBalanceKey = (idMesa, idSesion) =>
+  ['pagos', 'total', idMesa, ...(idSesion === undefined ? [] : [idSesion])];
 
-/**
- * Deuda de una mesa: GET /pagos/total/:idMesa.
- *
- * Se llama solo con la mesa que la cajera seleccionó — nunca dentro de un
- * .map() sobre todo el listado de /mesas. Evitar ese N+1 es una decisión
- * explícita de esta fase: la deuda se consulta recién cuando hay una
- * selección concreta.
- *
- * `enabled: idMesa != null` es lo único que controla el disparo automático:
- * el criterio de negocio "solo si la mesa tiene sesionActiva" vive en quien
- * llama a este hook (CashierPage decide qué idMesa pasarle, o `null` si la
- * mesa elegida está libre), no acá, porque este hook no conoce el objeto
- * mesa completo, solo el id.
- */
-export function useTableBalance(idMesa) {
+/** Solo se consulta la mesa seleccionada con sesión activa, nunca un N+1. */
+export function useTableBalance(idMesa, idSesion, { enabled = true } = {}) {
   return useQuery({
-    queryKey: tableBalanceKey(idMesa),
-    queryFn: () => api.get(`/pagos/total/${idMesa}`),
-    enabled: idMesa != null,
+    queryKey: tableBalanceKey(idMesa, idSesion),
+    queryFn: async ({ signal }) => {
+      const balance = await api.get(`/pagos/total/${idMesa}`, { signal });
+      assertCashierContext(balance.idSesion, idSesion);
+      return balance;
+    },
+    enabled: enabled && idMesa != null && idSesion != null,
+    refetchInterval: 4000,
+    gcTime: 0,
   });
 }
